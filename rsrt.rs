@@ -522,18 +522,18 @@ fn main() {
 	let image_file_header = format!("P6\n{} {}\n{}\n", IMAGE_WIDTH, IMAGE_HEIGHT, 255);
 	
 	let image_file_path = std::path::Path::new("image.ppm");
-    let mut image_file = match std::fs::File::create(&image_file_path) {
-        Err(why) => panic!("Couldn't create image file: {}", why),
-        Ok(file) => file
-    };
-    
-    match image_file.write_all(image_file_header.as_bytes()) {
-        Err(why) => panic!("Couldn't write image header: {}", why),
-        Ok(_) => { }
-    };
-    
-    match image_file.write_all(image_bytes.borrow()) {
-        Err(why) => panic!("Couldn't write image data: {}", why),
-        Ok(_) => { }
-    };
+	let mut image_file = match std::fs::File::create(&image_file_path) {
+		Err(why) => panic!("Couldn't create image file: {}", why),
+		Ok(file) => file
+	};
+
+	match image_file.write_all(image_file_header.as_bytes()) {
+		Err(why) => panic!("Couldn't write image header: {}", why),
+		Ok(_) => { }
+	};
+
+	match image_file.write_all(image_bytes.borrow()) {
+		Err(why) => panic!("Couldn't write image data: {}", why),
+		Ok(_) => { }
+	};
 }
