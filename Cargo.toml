@@ -1,0 +1,11 @@
+[package]
+name = "rsrt"
+version = "0.1.0"
+authors = ["Chris Foster <cdbfoster@gmail.com>"]
+
+[dependencies]
+rand = "*"
+
+[[bin]]
+name = "rsrt"
+path = "./rsrt.rs"
