@@ -65,6 +65,18 @@ impl Float3 {
 	fn normalized(self) -> Float3 {
 		self * (1.0 / self.length())
 	}
+	
+	fn make_orthonormals(&self) -> (Float3, Float3) {
+		let tangent = if self.x != self.y || self.x != self.z {
+			Float3::new(self.z - self.y, self.x - self.z, self.y - self.x).normalized()
+		} else {
+			Float3::new(self.z - self.y, self.x + self.z, -self.y - self.x).normalized()
+		};
+		
+		let bitangent = self.cross(&tangent);
+		
+		(tangent, bitangent)
+	}	
 }
 
 impl Add for Float3 {
@@ -209,14 +221,7 @@ impl BxDF for DiffuseBRDF {
 		let y = r * theta.sin();
 		let z = (0.0f32).max(1.0 - x * x - y * y).sqrt();
 		
-		let tangent = if normal.x != normal.y || normal.x != normal.z {
-			Float3::new(normal.z - normal.y, normal.x - normal.z, normal.y - normal.x).normalized()
-		} else {
-			Float3::new(normal.z - normal.y, normal.x + normal.z, -normal.y - normal.x).normalized()
-		};
-		
-		let bitangent = normal.cross(&tangent);
-		
+		let (tangent, bitangent) = normal.make_orthonormals();
 		let wi = tangent * x + bitangent * y + *normal * z;
 		
 		(wi, z * FRAC_1_PI)
@@ -228,8 +233,18 @@ impl BxDF for DiffuseBRDF {
 }
 
 
-#[allow(dead_code)]
 struct MirrorBRDF;
+
+impl BxDF for MirrorBRDF {
+	fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32) {
+		let wi = *wo - *normal * 2.0 * normal.dot(wo);
+		(wi, 0.0)
+	}
+	
+	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32 {
+		0.0
+	}
+}
 
 
 #[allow(dead_code)]
@@ -255,6 +270,26 @@ impl MatteMaterial {
 }
 
 impl Material for MatteMaterial {
+	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
+		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
+		
+		(Ray::new(ray.origin + ray.direction * i.t, wi), *l, self.color * *throughput)
+	}
+}
+
+
+struct MirrorMaterial {
+	color: Float3,
+	bsdf: MirrorBRDF
+}
+
+impl MirrorMaterial {
+	fn new(color: Float3) -> MirrorMaterial {
+		MirrorMaterial { color: color, bsdf: MirrorBRDF }
+	}
+}
+
+impl Material for MirrorMaterial {
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
 		
@@ -486,8 +521,9 @@ fn main() {
 	let scene = Scene {
 		objects: vec![
 			Object::new(Box::new(Sphere { origin: Float3::new(1.5, 8.0, 0.0), radius: 1.0 }), Box::new(MatteMaterial::new(Float3::new(0.2, 0.9, 0.2)))),
-			Object::new(Box::new(Sphere { origin: Float3::new(0.0, 1000.0, 0.0), radius: 990.0 }), Box::new(MatteMaterial::new(Float3::new(0.7, 0.7, 0.7)))),
-			Object::new(Box::new(Sphere { origin: Float3::new(-1.5, 8.0, 0.0), radius: 1.0 }), Box::new(EmissionMaterial::new(Float3::new(3.0, 3.0, 3.0))))
+			Object::new(Box::new(Sphere { origin: Float3::new(0.0, 1002.0, 0.0), radius: 990.0 }), Box::new(MatteMaterial::new(Float3::new(0.7, 0.7, 0.7)))),
+			Object::new(Box::new(Sphere { origin: Float3::new(-1.5, 8.0, 0.0), radius: 1.0 }), Box::new(EmissionMaterial::new(Float3::new(3.0, 3.0, 3.0)))),
+			Object::new(Box::new(Sphere { origin: Float3::new(0.0, 9.5, 0.0), radius: 1.0 }), Box::new(MirrorMaterial::new(Float3::new(1.0, 1.0, 1.0))))
 		]
 	};
 	
