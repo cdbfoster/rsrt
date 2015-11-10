@@ -26,6 +26,7 @@ use std::ops::{Add, Sub, Mul, Neg};
 
 extern crate rand;
 
+// Represents both vectors and colors
 #[derive(Copy, Clone, Debug)]
 struct Float3 {
 	x: f32,
@@ -66,6 +67,7 @@ impl Float3 {
 		self * (1.0 / self.length())
 	}
 
+	// Returns a tangent and bitangent vector
 	fn make_orthonormals(&self) -> (Float3, Float3) {
 		let tangent = if self.x != self.y || self.x != self.z {
 			Float3::new(self.z - self.y, self.x - self.z, self.y - self.x).normalized()
@@ -164,7 +166,6 @@ impl Ray {
 
 trait Intersectable {
 	fn intersect<'a>(&'a self, ray: &Ray, owner: &'a Object) -> Option<Intersection>;
-	//fn intersect_test(&self, ray: &Ray) -> bool;
 }
 
 struct Intersection<'a> {
@@ -221,8 +222,9 @@ impl Intersectable for Sphere {
 
 
 trait BxDF {
+	// Returns a random incoming vector for the given outgoing vector, and the pdf
 	fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32);
-	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;
+	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;	// Unused, so far
 }
 
 
@@ -273,6 +275,7 @@ struct GlassBSDF {
 
 
 trait Material {
+	// Returns a new ray after bouncing the old one off of the material, along with the new radiance and throughput
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3);
 }
 
@@ -360,8 +363,10 @@ struct Scene {
 }
 
 impl Scene {
+	// Returns the closest intersection, if any, among all objects
 	fn intersect(&self, ray: &Ray) -> Option<Intersection> {
 		let mut closest_intersection: Option<Intersection> = None;
+
 		for object in self.objects.iter() {
 			match object.intersectable.intersect(ray, object) {
 				Some(i) => {
@@ -403,6 +408,7 @@ trait Sampler: Iterator {
 }
 
 
+// The SimpleSampler just hands out each sample consecutive to the last
 struct SimpleSampler {
 	x: usize,
 	y: usize,
@@ -498,6 +504,7 @@ impl Camera for PerspectiveCamera {
 
 
 trait Integrator {
+	// Returns the radiance entering the camera along ray
 	fn integrate(&self, ray: &Ray) -> Float3;
 }
 
@@ -588,6 +595,7 @@ fn main() {
 		*pixel = *pixel + l * sample_scale;
 	}
 
+	// Clamp everything and convert to bytes
 	let mut image_bytes: Vec<u8> = vec![0; IMAGE_WIDTH * IMAGE_HEIGHT * 3];
 	for (index, pixel) in image_buffer.iter().enumerate() {
 		image_bytes[index * 3 + 0] = to_255(pixel.x);
@@ -595,6 +603,7 @@ fn main() {
 		image_bytes[index * 3 + 2] = to_255(pixel.z);
 	}
 
+	// Write ppm file
 	let image_file_header = format!("P6\n{} {}\n{}\n", IMAGE_WIDTH, IMAGE_HEIGHT, 255);
 
 	let image_file_path = std::path::Path::new("image.ppm");
