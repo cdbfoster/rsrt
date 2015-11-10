@@ -274,11 +274,6 @@ impl BxDF for MirrorBRDF {
     }
 }
 
-#[allow(dead_code)]
-struct GlassBSDF {
-    ior: f32,
-}
-
 trait Material {
     /// Returns a new ray after bouncing the old one off of the material, along with
     /// the new radiance and throughput
