@@ -26,7 +26,7 @@ use std::ops::{Add, Sub, Mul, Neg};
 
 extern crate rand;
 
-// Represents both vectors and colors
+/// Represents both vectors and colors
 #[derive(Copy, Clone, Debug)]
 struct Float3 {
     x: f32,
@@ -71,7 +71,7 @@ impl Float3 {
         self * (1.0 / self.length())
     }
 
-    // Returns a tangent and bitangent vector
+    /// Returns a tangent and bitangent vector
     fn make_orthonormals(&self) -> (Float3, Float3) {
         let tangent = if self.x != self.y || self.x != self.z {
             Float3::new(self.z - self.y, self.x - self.z, self.y - self.x).normalized()
@@ -236,9 +236,10 @@ impl Intersectable for Sphere {
 
 
 trait BxDF {
-    // Returns a random incoming vector for the given outgoing vector, and the pdf
+    /// Returns a random incoming vector for the given outgoing vector, and the pdf
     fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32);
-    fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;	// Unused, so far
+	/// Unused, so far
+    fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;
 }
 
 
@@ -286,8 +287,8 @@ struct GlassBSDF {
 
 
 trait Material {
-    // Returns a new ray after bouncing the old one off of the material, along with
-    // the new radiance and throughput
+    /// Returns a new ray after bouncing the old one off of the material, along with
+    /// the new radiance and throughput
     fn sample(&self,
               ray: &Ray,
               i: &Intersection,
@@ -407,7 +408,7 @@ struct Scene {
 }
 
 impl Scene {
-    // Returns the closest intersection, if any, among all objects
+    /// Returns the closest intersection, if any, among all objects
     fn intersect(&self, ray: &Ray) -> Option<Intersection> {
         let mut closest_intersection: Option<Intersection> = None;
 
@@ -457,7 +458,7 @@ trait Sampler: Iterator {
 }
 
 
-// The SimpleSampler just hands out each sample consecutive to the last
+/// The SimpleSampler just hands out each sample consecutive to the last
 struct SimpleSampler {
     x: usize,
     y: usize,
@@ -553,7 +554,7 @@ impl Camera for PerspectiveCamera {
 
 
 trait Integrator {
-    // Returns the radiance entering the camera along ray
+    /// Returns the radiance entering the camera along ray
     fn integrate(&self, ray: &Ray) -> Float3;
 }
 
