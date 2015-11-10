@@ -217,6 +217,7 @@ trait BxDF {
 struct DiffuseBRDF;
 
 impl BxDF for DiffuseBRDF {
+	#[allow(unused_variables)]
 	fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32) {
 		let r = rand::random::<f32>().sqrt();
 		let theta = 2.0 * PI * rand::random::<f32>();
@@ -231,6 +232,7 @@ impl BxDF for DiffuseBRDF {
 		(wi, z * FRAC_1_PI)
 	}
 
+	#[allow(unused_variables)]
 	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32 {
 		(0.0f32).max(normal.dot(wi)) * FRAC_1_PI
 	}
@@ -245,6 +247,7 @@ impl BxDF for MirrorBRDF {
 		(wi, 0.0)
 	}
 
+	#[allow(unused_variables)]
 	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32 {
 		0.0
 	}
@@ -274,6 +277,7 @@ impl MatteMaterial {
 }
 
 impl Material for MatteMaterial {
+	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
 
@@ -294,6 +298,7 @@ impl MirrorMaterial {
 }
 
 impl Material for MirrorMaterial {
+	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
 
@@ -314,6 +319,7 @@ impl EmissionMaterial {
 }
 
 impl Material for EmissionMaterial {
+	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
 
