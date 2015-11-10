@@ -37,11 +37,11 @@ impl Float3 {
 	fn new(x: f32, y: f32, z: f32) -> Float3 {
 		Float3 { x: x, y: y, z: z}
 	}
-	
+
 	fn zero() -> Float3 {
 		Float3 { x: 0.0, y: 0.0, z: 0.0 }
 	}
-	
+
 	fn dot(&self, rhs: &Float3) -> f32 {
 		self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
 	}
@@ -65,19 +65,19 @@ impl Float3 {
 	fn normalized(self) -> Float3 {
 		self * (1.0 / self.length())
 	}
-	
+
 	fn make_orthonormals(&self) -> (Float3, Float3) {
 		let tangent = if self.x != self.y || self.x != self.z {
 			Float3::new(self.z - self.y, self.x - self.z, self.y - self.x).normalized()
 		} else {
 			Float3::new(self.z - self.y, self.x + self.z, -self.y - self.x).normalized()
 		};
-		
+
 		let bitangent = self.cross(&tangent);
-		
+
 		(tangent, bitangent)
 	}
-	
+
 	fn average(&self) -> f32 {
 		(self.x + self.y + self.z) / 3.0
 	}
@@ -171,38 +171,38 @@ struct Sphere {
 impl Intersectable for Sphere {
 	fn intersect<'a>(&'a self, ray: &Ray, owner: &'a Object) -> Option<Intersection> {
 		let r = Ray::new(ray.origin - self.origin, ray.direction);
-		
+
 		let a = r.direction.length_squared();
 		let b = 2.0 * (r.origin.dot(&r.direction));
 		let c = r.origin.length_squared() - self.radius * self.radius;
-		
+
 		let discriminant = b * b - 4.0 * a * c;
 		if discriminant < 0.0 {
 			return None;
 		}
-		
+
 		let discriminant_root = discriminant.sqrt();
 		let q = if b < 0.0 {
 			-0.5 * (b - discriminant_root)
 		} else {
 			-0.5 * (b + discriminant_root)
 		};
-		
+
 		let t0 = &mut (q / a);
 		let t1 = &mut (c / q);
 		if *t0 > *t1 {
 			swap(t0, t1);
 		}
-		
+
 		if *t0 > ray.t_bounds.1 || *t1 < ray.t_bounds.0 {
 			return None;
 		}
-		
+
 		let t = if *t0 >= ray.t_bounds.0 { *t0 } else { *t1 };
 		if t > ray.t_bounds.1 { return None; }
-		
+
 		let normal = (r.origin + r.direction * t).normalized();
-		
+
 		Some(Intersection { t: t, normal: normal, object: owner })
 	}
 }
@@ -220,17 +220,17 @@ impl BxDF for DiffuseBRDF {
 	fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32) {
 		let r = rand::random::<f32>().sqrt();
 		let theta = 2.0 * PI * rand::random::<f32>();
-		
+
 		let x = r * theta.cos();
 		let y = r * theta.sin();
 		let z = (0.0f32).max(1.0 - x * x - y * y).sqrt();
-		
+
 		let (tangent, bitangent) = normal.make_orthonormals();
 		let wi = tangent * x + bitangent * y + *normal * z;
-		
+
 		(wi, z * FRAC_1_PI)
 	}
-	
+
 	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32 {
 		(0.0f32).max(normal.dot(wi)) * FRAC_1_PI
 	}
@@ -244,7 +244,7 @@ impl BxDF for MirrorBRDF {
 		let wi = *wo - *normal * 2.0 * normal.dot(wo);
 		(wi, 0.0)
 	}
-	
+
 	fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32 {
 		0.0
 	}
@@ -276,7 +276,7 @@ impl MatteMaterial {
 impl Material for MatteMaterial {
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
-		
+
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l, self.color * *throughput)
 	}
 }
@@ -296,7 +296,7 @@ impl MirrorMaterial {
 impl Material for MirrorMaterial {
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
-		
+
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l, self.color * *throughput)
 	}
 }
@@ -316,7 +316,7 @@ impl EmissionMaterial {
 impl Material for EmissionMaterial {
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
-		
+
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l + *throughput * self.emission, *throughput)
 	}
 }
@@ -361,7 +361,7 @@ impl Scene {
 				None => { }
 			}
 		}
-		
+
 		closest_intersection
 	}
 }
@@ -409,13 +409,13 @@ impl SimpleSampler {
 
 impl Iterator for SimpleSampler {
 	type Item = Sample;
-	
+
 	fn next(&mut self) -> Option<Sample> {
 		if self.s == self.spp {
 			None
 		} else {
 			let sample = Sample::new(self.x, self.y);
-			
+
 			self.x += 1;
 			if self.x == self.x_bounds.1 {
 				self.x = self.x_bounds.0;
@@ -425,7 +425,7 @@ impl Iterator for SimpleSampler {
 					self.s += 1;
 				}
 			}
-			
+
 			Some(sample)
 		}
 	}
@@ -435,7 +435,7 @@ impl Sampler for SimpleSampler {
 	fn get_bounds(&self) -> ((usize, usize), (usize, usize)) {
 		(self.x_bounds, self.y_bounds)
 	}
-	
+
 	fn get_spp(&self) -> u32 {
 		self.spp
 	}
@@ -465,11 +465,11 @@ impl Camera for PerspectiveCamera {
 			-(2.0 * sample.image_y as f32 / self.image_size.0 as f32 - 1.0),
 			  2.0
 		).normalized();
-		
+
 		let forward = self.look.direction;
 		let right = forward.cross(&Float3::new(0.0, 0.0, 1.0)).normalized();
 		let up = right.cross(&forward);
-		
+
 		Ray::new(self.look.origin,
 			right * direction.x +
 			up * direction.y +
@@ -493,7 +493,7 @@ impl<'a> Integrator for PathTracer<'a> {
 		let mut l = Float3::zero();
 		let mut throughput = Float3::new(1.0, 1.0, 1.0);
 		let mut r = *ray;
-		
+
 		let mut bounces: u32 = 0;
 		loop {
 			match self.scene.intersect(&r) {
@@ -501,22 +501,22 @@ impl<'a> Integrator for PathTracer<'a> {
 					if r.direction.dot(&i.normal) > 0.0 {
 						i.normal = i.normal * -1.0;
 					}
-					
+
 					let (r2, l2, throughput2) = i.object.material.sample(&r, &i, &l, &throughput);
-					
+
 					r = Ray::new(r2.origin + i.normal * 0.001, r2.direction);
 					l = l2;
 					throughput = throughput2;
-					
+
 					bounces += 1;
 					if bounces > 3 {
 						let probability = throughput.average();
-						
+
 						if probability == 0.0 {
 							break;
 						} else {
 							if probability < rand::random::<f32>() { break; }
-							
+
 							throughput = throughput * probability;
 						}
 					}
@@ -524,7 +524,7 @@ impl<'a> Integrator for PathTracer<'a> {
 				None => { break; }
 			}
 		}
-	
+
 		l
 	}
 }
@@ -548,37 +548,37 @@ fn main() {
 			Object::new(Box::new(Sphere { origin: Float3::new(0.0, 9.5, 0.0), radius: 1.0 }), Box::new(MirrorMaterial::new(Float3::new(0.6, 0.6, 0.6))))
 		]
 	};
-	
+
 	let camera = PerspectiveCamera::new(
 		Ray::new(Float3::new(0.0, 4.0, 5.0), Float3::new(0.0, 4.5, -5.0).normalized()),
 		(IMAGE_WIDTH, IMAGE_HEIGHT)
 	);
-	
+
 	let integrator = PathTracer { scene: &scene };
-	
+
 	let sampler = SimpleSampler::new((0, IMAGE_WIDTH), (0, IMAGE_HEIGHT), SPP);
-	
+
 	let mut image_buffer = vec![Float3::zero(); IMAGE_WIDTH * IMAGE_HEIGHT];
-	
+
 	let sample_scale = 1.0 / SPP as f32;
 	for sample in sampler {
 		let ray = camera.generate_ray(&sample);
-		
+
 		let l = integrator.integrate(&ray);
-		
+
 		let pixel = &mut image_buffer[sample.image_y * IMAGE_WIDTH + sample.image_x];
 		*pixel = *pixel + l * sample_scale;
 	}
-	
+
 	let mut image_bytes: Vec<u8> = vec![0; IMAGE_WIDTH * IMAGE_HEIGHT * 3];
 	for (index, pixel) in image_buffer.iter().enumerate() {
 		image_bytes[index * 3 + 0] = to_255(pixel.x);
 		image_bytes[index * 3 + 1] = to_255(pixel.y);
 		image_bytes[index * 3 + 2] = to_255(pixel.z);
 	}
-	
+
 	let image_file_header = format!("P6\n{} {}\n{}\n", IMAGE_WIDTH, IMAGE_HEIGHT, 255);
-	
+
 	let image_file_path = std::path::Path::new("image.ppm");
 	let mut image_file = match std::fs::File::create(&image_file_path) {
 		Err(why) => panic!("Couldn't create image file: {}", why),
