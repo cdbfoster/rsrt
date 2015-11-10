@@ -5,7 +5,3 @@ authors = ["Chris Foster <cdbfoster@gmail.com>"]
 
 [dependencies]
 rand = "*"
-
-[[bin]]
-name = "rsrt"
-path = "./rsrt.rs"
