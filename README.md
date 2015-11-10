@@ -6,8 +6,6 @@ Check out the source by cloning the repository:
 
     $ git clone https://github.com/cdbfoster/rsrt.git
 
-The source was written using a tab width of 4.
-
 ## Building
 rsrt uses Rust's Cargo to manage it.  Just use `cargo build` to build the project, or `cargo run` to build and run the project.  Append the `--release` flag to either of those to build in "release" mode.
 
