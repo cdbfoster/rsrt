@@ -22,7 +22,7 @@ use std::f32;
 use std::f32::consts::{PI, FRAC_1_PI};
 use std::io::Write;
 use std::mem::swap;
-use std::ops::{Add, Sub, Mul};
+use std::ops::{Add, Sub, Mul, Neg};
 
 extern crate rand;
 
@@ -127,6 +127,18 @@ impl Mul<f32> for Float3 {
 			x: self.x * rhs,
 			y: self.y * rhs,
 			z: self.z * rhs
+		}
+	}
+}
+
+impl Neg for Float3 {
+	type Output = Float3;
+
+	fn neg(self) -> Float3 {
+		Float3 {
+			x: -self.x,
+			y: -self.y,
+			z: -self.z
 		}
 	}
 }
@@ -243,7 +255,7 @@ struct MirrorBRDF;
 
 impl BxDF for MirrorBRDF {
 	fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32) {
-		let wi = *wo - *normal * 2.0 * normal.dot(wo);
+		let wi =  *normal * 2.0 * normal.dot(wo) - *wo;
 		(wi, 0.0)
 	}
 
@@ -279,7 +291,7 @@ impl MatteMaterial {
 impl Material for MatteMaterial {
 	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
-		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
+		let (wi, pdf) = self.bsdf.sample(&(-ray.direction), &i.normal);
 
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l, self.color * *throughput)
 	}
@@ -300,7 +312,7 @@ impl MirrorMaterial {
 impl Material for MirrorMaterial {
 	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
-		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
+		let (wi, pdf) = self.bsdf.sample(&(-ray.direction), &i.normal);
 
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l, self.color * *throughput)
 	}
@@ -321,7 +333,7 @@ impl EmissionMaterial {
 impl Material for EmissionMaterial {
 	#[allow(unused_variables)]
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
-		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
+		let (wi, pdf) = self.bsdf.sample(&(-ray.direction), &i.normal);
 
 		(Ray::new(ray.origin + ray.direction * i.t, wi), *l + *throughput * self.emission, *throughput)
 	}
