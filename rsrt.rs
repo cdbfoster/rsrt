@@ -492,7 +492,11 @@ impl<'a> Integrator for PathTracer<'a> {
 		
 		loop {
 			match self.scene.intersect(&r) {
-				Some(i) => {
+				Some(mut i) => {
+					if r.direction.dot(&i.normal) > 0.0 {
+						i.normal = i.normal * -1.0;
+					}
+					
 					let (r2, l2, throughput2) = i.object.material.sample(&r, &i, &l, &throughput);
 					
 					r = Ray::new(r2.origin + i.normal * 0.001, r2.direction);
