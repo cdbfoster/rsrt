@@ -76,7 +76,11 @@ impl Float3 {
 		let bitangent = self.cross(&tangent);
 		
 		(tangent, bitangent)
-	}	
+	}
+	
+	fn average(&self) -> f32 {
+		(self.x + self.y + self.z) / 3.0
+	}
 }
 
 impl Add for Float3 {
@@ -490,6 +494,7 @@ impl<'a> Integrator for PathTracer<'a> {
 		let mut throughput = Float3::new(1.0, 1.0, 1.0);
 		let mut r = *ray;
 		
+		let mut bounces: u32 = 0;
 		loop {
 			match self.scene.intersect(&r) {
 				Some(mut i) => {
@@ -502,6 +507,19 @@ impl<'a> Integrator for PathTracer<'a> {
 					r = Ray::new(r2.origin + i.normal * 0.001, r2.direction);
 					l = l2;
 					throughput = throughput2;
+					
+					bounces += 1;
+					if bounces > 3 {
+						let probability = throughput.average();
+						
+						if probability == 0.0 {
+							break;
+						} else {
+							if probability < rand::random::<f32>() { break; }
+							
+							throughput = throughput * probability;
+						}
+					}
 				},
 				None => { break; }
 			}
