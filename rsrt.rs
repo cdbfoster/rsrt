@@ -313,7 +313,7 @@ impl Material for EmissionMaterial {
 	fn sample(&self, ray: &Ray, i: &Intersection, l: &Float3, throughput: &Float3) -> (Ray, Float3, Float3) {
 		let (wi, pdf) = self.bsdf.sample(&ray.direction, &i.normal);
 		
-		(Ray::new(ray.origin + ray.direction * i.t, wi), *l + *throughput * self.emission, *throughput * self.emission)
+		(Ray::new(ray.origin + ray.direction * i.t, wi), *l + *throughput * self.emission, *throughput)
 	}
 }
 
