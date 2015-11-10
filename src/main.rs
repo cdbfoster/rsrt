@@ -1,4 +1,3 @@
-//
 // This file is part of rsrt.
 //
 // rsrt is free software: you can redistribute it and/or modify
@@ -15,7 +14,6 @@
 // along with rsrt. If not, see <http://www.gnu.org/licenses/>.
 //
 // Copyright 2015 Chris Foster
-//
 
 use std::borrow::Borrow;
 use std::f32;
@@ -90,7 +88,7 @@ impl Float3 {
 }
 
 impl Add for Float3 {
-	type Output = Float3;
+    type Output = Float3;
 
     fn add(self, rhs: Float3) -> Float3 {
         Float3 {
@@ -102,7 +100,7 @@ impl Add for Float3 {
 }
 
 impl Sub for Float3 {
-	type Output = Float3;
+    type Output = Float3;
 
     fn sub(self, rhs: Float3) -> Float3 {
         Float3 {
@@ -114,7 +112,7 @@ impl Sub for Float3 {
 }
 
 impl Mul for Float3 {
-	type Output = Float3;
+    type Output = Float3;
 
     fn mul(self, rhs: Float3) -> Float3 {
         Float3 {
@@ -126,7 +124,7 @@ impl Mul for Float3 {
 }
 
 impl Mul<f32> for Float3 {
-	type Output = Float3;
+    type Output = Float3;
 
     fn mul(self, rhs: f32) -> Float3 {
         Float3 {
@@ -138,7 +136,7 @@ impl Mul<f32> for Float3 {
 }
 
 impl Neg for Float3 {
-	type Output = Float3;
+    type Output = Float3;
 
     fn neg(self) -> Float3 {
         Float3 {
@@ -235,7 +233,7 @@ impl Intersectable for Sphere {
 trait BxDF {
     /// Returns a random incoming vector for the given outgoing vector, and the pdf
     fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32);
-	/// Unused, so far
+    /// Unused, so far
     fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;
 }
 
@@ -517,8 +515,7 @@ impl PerspectiveCamera {
 impl Camera for PerspectiveCamera {
     fn generate_ray(&self, sample: &Sample) -> Ray {
         let direction = Float3::new(2.0 * sample.image_x as f32 / self.image_size.0 as f32 - 1.0,
-                                    -(2.0 * sample.image_y as f32 / self.image_size.0 as f32 -
-                                      1.0),
+                                  -(2.0 * sample.image_y as f32 / self.image_size.0 as f32 - 1.0),
                                     2.0)
                             .normalized();
 
