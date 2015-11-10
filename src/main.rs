@@ -167,7 +167,6 @@ impl Ray {
     }
 }
 
-
 trait Intersectable {
     fn intersect<'a>(&'a self, ray: &Ray, owner: &'a Object) -> Option<Intersection>;
 }
@@ -178,7 +177,6 @@ struct Intersection<'a> {
     // u: f32, v: f32,
     object: &'a Object,
 }
-
 
 struct Sphere {
     origin: Float3,
@@ -234,14 +232,12 @@ impl Intersectable for Sphere {
     }
 }
 
-
 trait BxDF {
     /// Returns a random incoming vector for the given outgoing vector, and the pdf
     fn sample(&self, wo: &Float3, normal: &Float3) -> (Float3, f32);
 	/// Unused, so far
     fn pdf(&self, wo: &Float3, normal: &Float3, wi: &Float3) -> f32;
 }
-
 
 struct DiffuseBRDF;
 
@@ -265,7 +261,6 @@ impl BxDF for DiffuseBRDF {
     }
 }
 
-
 struct MirrorBRDF;
 
 impl BxDF for MirrorBRDF {
@@ -279,12 +274,10 @@ impl BxDF for MirrorBRDF {
     }
 }
 
-
 #[allow(dead_code)]
 struct GlassBSDF {
     ior: f32,
 }
-
 
 trait Material {
     /// Returns a new ray after bouncing the old one off of the material, along with
@@ -296,7 +289,6 @@ trait Material {
               throughput: &Float3)
               -> (Ray, Float3, Float3);
 }
-
 
 struct MatteMaterial {
     color: Float3,
@@ -327,7 +319,6 @@ impl Material for MatteMaterial {
     }
 }
 
-
 struct MirrorMaterial {
     color: Float3,
     bsdf: MirrorBRDF,
@@ -356,7 +347,6 @@ impl Material for MirrorMaterial {
          self.color * *throughput)
     }
 }
-
 
 struct EmissionMaterial {
     emission: Float3,
@@ -387,7 +377,6 @@ impl Material for EmissionMaterial {
     }
 }
 
-
 struct Object {
     intersectable: Box<Intersectable>,
     material: Box<Material>,
@@ -401,7 +390,6 @@ impl Object {
         }
     }
 }
-
 
 struct Scene {
     objects: Vec<Object>,
@@ -436,7 +424,6 @@ impl Scene {
     }
 }
 
-
 struct Sample {
     image_x: usize,
     image_y: usize,
@@ -451,12 +438,10 @@ impl Sample {
     }
 }
 
-
 trait Sampler: Iterator {
     fn get_bounds(&self) -> ((usize, usize), (usize, usize));
     fn get_spp(&self) -> u32;
 }
-
 
 /// The SimpleSampler just hands out each sample consecutive to the last
 struct SimpleSampler {
@@ -515,7 +500,6 @@ impl Sampler for SimpleSampler {
     }
 }
 
-
 trait Camera {
     fn generate_ray(&self, sample: &Sample) -> Ray;
 }
@@ -552,12 +536,10 @@ impl Camera for PerspectiveCamera {
     }
 }
 
-
 trait Integrator {
     /// Returns the radiance entering the camera along ray
     fn integrate(&self, ray: &Ray) -> Float3;
 }
-
 
 struct PathTracer<'a> {
     scene: &'a Scene,
@@ -608,11 +590,9 @@ impl<'a> Integrator for PathTracer<'a> {
     }
 }
 
-
 fn to_255(value: f32) -> u8 {
     (value.max(0.0).min(1.0) * 255.0 + 0.5) as u8
 }
-
 
 fn main() {
     const IMAGE_WIDTH: usize = 512;
