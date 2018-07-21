@@ -1,20 +1,14 @@
-#rsrt
-rsrt is a small, extensible, physically based ray tracer.  It's very simple, although it does provide quite a few handy abstractions.  The purpose of the project is mainly an exercise in learning the Rust language.  As a learning exercise, the effort has not been put into making the program efficient, but rather into making it clear and expressive.
+RSRT is a small, but very extensible ray tracing framework with some useful implementations.  It is useable, and provides a basic
+forward path tracer, a sphere, and some simple materials.
 
-## Source
-Check out the source by cloning the repository:
+To build and render the default scene, use
 
-    $ git clone https://github.com/cdbfoster/rsrt.git
+    $ cargo run --release
 
-## Building
-rsrt uses Rust's Cargo to manage it.  Just use `cargo build` to build the project, or `cargo run` to build and run the project.  Append the `--release` flag to either of those to build in "release" mode.
+While it is possible to use RSRT's traits and implementations in other projects, it is not intended to be more than its simple example
+binary; its modules are marked `pub` so that `rustdoc` picks them up.  If you want to use them elsewhere, you can move what you need
+into a separate `lib.rs` file and have `cargo` build you an actual library.
 
-##Usage
-Run `rsrt` from the `target/debug` or `target/release` folder, depending on the options used to build the project.  Or just use `cargo run`, mentioned above.
-
-Currently there is no command-line configurability, and rsrt just spits out a .ppm file containing its render of its default scene.  This is likely to change.
-
-## Contact
 Questions and comments can be sent to my email, cdbfoster@gmail.com.
 
-© 2015 Chris Foster
+© 2018 Chris Foster
