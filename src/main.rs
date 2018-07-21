@@ -22,6 +22,10 @@
 //! ```
 //! $ cargo run --release
 //! ```
+//! To build and view the documentation, use
+//! ```
+//! $ cargo doc --open
+//! ```
 //!
 //! While it is possible to use RSRT's traits and implementations in other projects, it is not intended to be more than its simple example
 //! binary; its modules are marked `pub` so that `rustdoc` picks them up.  If you want to use them elsewhere, you can move what you need
