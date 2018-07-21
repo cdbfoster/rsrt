@@ -28,8 +28,8 @@
 //! ```
 //!
 //! While it is possible to use `rsrt`'s traits and implementations in other projects, it is not intended to be more than its simple example
-//! binary; its modules are marked `pub` so that `rustdoc` picks them up.  If you want to use them elsewhere, you can move what you need
-//! into a separate `lib.rs` file and have `cargo` build you an actual library.
+//! binary; its modules and functions are marked `pub` so that `rustdoc` picks them up.  If you want to use them elsewhere, you can move what
+//! you need into a separate `lib.rs` file and have `cargo` build you an actual library.
 
 // This is our only external dependency
 extern crate rand;
