@@ -123,7 +123,7 @@ pub fn main() {
 
 /// Accepts an image buffer of floating point data, clamps each channel to [0, 1], and
 /// quantizes each channel to 8 bits.
-pub fn clamp_and_quantize(image_buffer: &Vec<math::Float3>) -> Vec<u8> {
+pub fn clamp_and_quantize(image_buffer: &[math::Float3]) -> Vec<u8> {
     let mut bytes: Vec<u8> = vec![0; (IMAGE_WIDTH * IMAGE_HEIGHT * 3) as usize];
 
     for (index, pixel) in image_buffer.iter().enumerate() {
@@ -168,7 +168,7 @@ pub fn render<'a, I, S, C>(
 }
 
 /// Writes a quantized image buffer into a .ppm file.
-pub fn write_ppm_file(filename: &str, image_buffer: &Vec<u8>) {
+pub fn write_ppm_file(filename: &str, image_buffer: &[u8]) {
     use std::io::Write;
 
     println!("Writing file...");
