@@ -52,42 +52,50 @@ pub fn main() {
     let scene = Scene::new(vec![
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(-1.0, 3.0, 0.5),     // origin
-                0.5,                             // radius
+                Float3::new(-1.0, 3.0, 0.5),    // origin
+                0.5,                            // radius
             ), EmissionShader::new(
-                Float3::new(5.0, 4.0, 3.0),      // emission
+                Float3::new(5.0, 4.0, 3.0),     // emission
             ),
         )),
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(1.5, 4.0, 1.0),      // origin
-                1.0,                             // radius
+                Float3::new(1.5, 4.0, 1.0),     // origin
+                1.0,                            // radius
             ), MatteShader::new(
-                Float3::new(0.2, 0.9, 0.2),      // color
+                Float3::new(0.2, 0.9, 0.2),     // color
             ),
         )),
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(0.0, 6.0, 1.5),      // origin
-                1.5,                             // radius
+                Float3::new(0.35, 3.4, 0.8),    // origin
+                0.2,                            // radius
             ), MirrorShader::new(
-                Float3::new(0.8, 0.8, 0.8),      // color
+                Float3::new(0.7, 0.1, 0.1),     // color
             ),
         )),
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(0.0, 5.0, -10000.0), // origin
-                10000.0,                         // radius
+                Float3::new(0.0, 6.0, 1.5),     // origin
+                1.5,                            // radius
+            ), MirrorShader::new(
+                Float3::new(0.8, 0.8, 0.8),     // color
+            ),
+        )),
+        Box::new(Object::new(
+            Sphere::new(
+                Float3::new(0.0, 5.0, -5000.0), // origin
+                5000.0,                         // radius
             ), MatteShader::new(
-                Float3::new(0.7, 0.6, 0.6),      // color
+                Float3::new(0.7, 0.6, 0.6),     // color
             ),
         )),
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(0.0, 0.0, 0.0),      // origin
-                5000.0,                          // radius
+                Float3::new(0.0, 0.0, 0.0),     // origin
+                5000.0,                         // radius
             ), EmissionShader::new(
-                Float3::new(0.7, 0.75, 0.8),     // color
+                Float3::new(0.7, 0.75, 0.8),    // emission
             ),
         )),
     ]);
