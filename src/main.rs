@@ -807,12 +807,12 @@ pub mod shading {
 
         impl Shader for EmissionShader {
             fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
-                let BsdfSample { incoming: outgoing_direction, pdf: _ } = self.bsdf.sample(-incoming.direction, intersection.normal);
+                let BsdfSample { incoming: outgoing_direction, pdf } = self.bsdf.sample(-incoming.direction, intersection.normal);
 
                 ShaderSample {
                     outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
                     radiance: radiance + throughput * self.emission,
-                    throughput: throughput,
+                    throughput: throughput * pdf,
                 }
             }
         }
