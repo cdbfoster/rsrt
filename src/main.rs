@@ -52,34 +52,42 @@ pub fn main() {
     let scene = Scene::new(vec![
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(1.5, 8.0, 0.0),  // origin
-                1.0,                         // radius
-            ), MatteShader::new(
-                Float3::new(0.2, 0.9, 0.2),  // color
-            ),
-        )),
-        Box::new(Object::new(
-            Sphere::new(
-                Float3::new(0.0, 0.0, 0.0),  // origin
-                11.0,                        // radius
-            ), MatteShader::new(
-                Float3::new(0.7, 0.7, 0.7),  // color
-            ),
-        )),
-        Box::new(Object::new(
-            Sphere::new(
-                Float3::new(-1.5, 8.0, 0.0), // origin
-                1.0,                         // radius
+                Float3::new(-1.0, 3.0, 0.5),     // origin
+                0.5,                             // radius
             ), EmissionShader::new(
-                Float3::new(5.0, 5.0, 5.0),  // emission
+                Float3::new(5.0, 4.0, 3.0),      // emission
             ),
         )),
         Box::new(Object::new(
             Sphere::new(
-                Float3::new(0.0, 9.5, 0.0),  // origin
-                1.0,                         // radius
+                Float3::new(1.5, 4.0, 1.0),      // origin
+                1.0,                             // radius
+            ), MatteShader::new(
+                Float3::new(0.2, 0.9, 0.2),      // color
+            ),
+        )),
+        Box::new(Object::new(
+            Sphere::new(
+                Float3::new(0.0, 6.0, 1.5),      // origin
+                1.5,                             // radius
             ), MirrorShader::new(
-                Float3::new(0.6, 0.6, 0.6),  // color
+                Float3::new(0.8, 0.8, 0.8),      // color
+            ),
+        )),
+        Box::new(Object::new(
+            Sphere::new(
+                Float3::new(0.0, 5.0, -10000.0), // origin
+                10000.0,                         // radius
+            ), MatteShader::new(
+                Float3::new(0.7, 0.6, 0.6),      // color
+            ),
+        )),
+        Box::new(Object::new(
+            Sphere::new(
+                Float3::new(0.0, 0.0, 0.0),      // origin
+                5000.0,                          // radius
+            ), EmissionShader::new(
+                Float3::new(0.7, 0.75, 0.8),     // color
             ),
         )),
     ]);
@@ -93,8 +101,8 @@ pub fn main() {
     // Turns samples into rays
     let camera = PerspectiveCamera::new(
         Ray::new(
-            Float3::new(0.0, 4.0, 5.0),               // position
-            Float3::new(0.0, 4.5, -5.0).normalized(), // look
+            Float3::new(0.0, -2.0, 2.5),              // position
+            Float3::new(0.0, 4.0, -1.0).normalized(), // look
         ),
         (IMAGE_WIDTH, IMAGE_HEIGHT),
     );
