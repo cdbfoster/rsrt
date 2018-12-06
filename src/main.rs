@@ -95,7 +95,7 @@ pub fn main() {
                 Float3::new(0.0, 0.0, 0.0),     // origin
                 5000.0,                         // radius
             ), EmissionShader::new(
-                Float3::new(0.7, 0.75, 0.8),    // emission
+                Float3::new(0.825, 0.875, 0.95),// emission
             ),
         )),
     ]);
