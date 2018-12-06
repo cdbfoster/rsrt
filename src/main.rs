@@ -367,26 +367,25 @@ pub mod integration {
                             throughput: next_throughput,
                         } = point.shader.sample(&ray, &point.intersection, radiance, throughput);
 
-                        // Nudge the next ray slightly off the surface to prevent autocollisions
-                        ray = Ray::new(next_ray.origin + point.intersection.normal * 0.001, next_ray.direction);
                         radiance = next_radiance;
                         throughput = next_throughput;
 
                         bounces += 1;
-                        // If we've bounced more than three times, terminate rays with random chance
-                        if bounces > 3 {
-                            let probability = throughput.average();
 
-                            if probability == 0.0 {
+                        let continuation_probability = throughput.average();
+
+                        if continuation_probability == 0.0 {
+                            break 'cast_ray;
+                        } else if bounces > 3 { // If we've bounced more than three times, terminate rays with random chance
+                            if continuation_probability < rand::random::<f32>() {
                                 break 'cast_ray;
-                            } else {
-                                if probability < rand::random::<f32>() {
-                                    break 'cast_ray;
-                                }
-
-                                throughput = throughput * probability;
                             }
+
+                            throughput = throughput * continuation_probability;
                         }
+
+                        // Nudge the next ray slightly off the surface to prevent autocollisions
+                        ray = Ray::new(next_ray.origin + point.intersection.normal * 0.001, next_ray.direction);
                     } else {
                         break 'cast_ray;
                     }
