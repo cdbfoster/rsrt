@@ -808,26 +808,22 @@ pub mod shading {
         #[derive(Debug)]
         pub struct EmissionShader {
             emission: Float3,
-            bsdf: DiffuseBrdf,
         }
 
         impl EmissionShader {
             pub fn new(emission: Float3) -> Self {
                 Self {
                     emission: emission,
-                    bsdf: DiffuseBrdf,
                 }
             }
         }
 
         impl Shader for EmissionShader {
-            fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
-                let BsdfSample { incoming: outgoing_direction, pdf } = self.bsdf.sample(-incoming.direction, intersection.normal);
-
+            fn sample(&self, _: &Ray, _: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
                 ShaderSample {
-                    outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
+                    outgoing: Ray::new(Float3::zero(), Float3::zero()), // Reflection is undefined for an emission shader, so this will never be used
                     radiance: radiance + throughput * self.emission,
-                    throughput: throughput * pdf,
+                    throughput: Float3::zero(), // No throughput for emission shaders
                 }
             }
         }
@@ -855,7 +851,7 @@ pub mod shading {
                 ShaderSample {
                     outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
                     radiance: radiance,
-                    throughput: self.color * throughput,// * pdf,
+                    throughput: self.color * throughput,
                 }
             }
         }
