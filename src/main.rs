@@ -148,18 +148,18 @@ pub fn render<'a, I, S, C>(
     let mut image_buffer = vec![math::Float3::zero(); (IMAGE_WIDTH * IMAGE_HEIGHT) as usize];
 
     println!("Rendering...");
-    let sample_scale = 1.0 / SPP as f32;
+    const SAMPLE_SCALE: f32 = 1.0 / SPP as f32;
     for (i, sample) in sampler.iter().enumerate() {
         let ray = camera.generate_ray(&sample);
 
         let radiance = integrator.integrate(ray);
 
         let pixel = &mut image_buffer[(sample.image_y * IMAGE_WIDTH + sample.image_x) as usize];
-        *pixel = *pixel + radiance * sample_scale;
+        *pixel = *pixel + radiance * SAMPLE_SCALE;
 
         if (i + 1) % (IMAGE_WIDTH * IMAGE_HEIGHT) as usize == 0 {
             let current_spp = (i + 1) / (IMAGE_WIDTH * IMAGE_HEIGHT) as usize;
-            println!("  {} / {} spp, {:.2}%", current_spp, SPP, current_spp as f32 / SPP as f32 * 100.0);
+            println!("  {} / {} spp, {:.2}%", current_spp, SPP, current_spp as f32 * SAMPLE_SCALE * 100.0);
         }
     }
     println!("Render complete.");
@@ -173,19 +173,12 @@ pub fn write_ppm_file(filename: &str, image_buffer: &[u8]) {
 
     println!("Writing file...");
     let image_file_path = std::path::Path::new(filename);
-    let mut image_file = match std::fs::File::create(&image_file_path) {
-        Err(error) => panic!("Couldn't create image file: {}", error),
-        Ok(file) => file,
-    };
+    let mut image_file = std::fs::File::create(&image_file_path).expect("Couldn't create image file");
 
     let image_file_header = format!("P6\n{} {}\n{}\n", IMAGE_WIDTH, IMAGE_HEIGHT, 255);
-    if let Err(error) = image_file.write_all(image_file_header.as_bytes()) {
-        panic!("Couldn't write image header: {}", error);
-    }
+    image_file.write_all(image_file_header.as_bytes()).expect("Couldn't write image header");
+    image_file.write_all(image_buffer).expect("Couldn't write image data");
 
-    if let Err(error) = image_file.write_all(image_buffer) {
-        panic!("Couldn't write image data: {}", error);
-    }
     println!("Wrote file \"{}\".", filename);
 }
 
@@ -326,8 +319,6 @@ pub mod integration {
     pub mod impls {
         //! Integrator implementations
 
-        use rand;
-
         use integration::Integrator;
         use math::{Float3, Ray};
         use scene::Scene;
@@ -418,7 +409,7 @@ pub mod intersection {
         pub normal: Float3,
         // u: f32, v: f32,
         /// The surface that was intersected.
-        pub intersectable: &'a Intersectable,
+        pub intersectable: &'a dyn Intersectable,
     }
 }
 
@@ -731,11 +722,11 @@ pub mod scene {
     /// A collection of shadeable objects.
     #[derive(Debug)]
     pub struct Scene {
-        pub objects: Vec<Box<Shadeable>>,
+        pub objects: Vec<Box<dyn Shadeable>>,
     }
 
     impl Scene {
-        pub fn new(objects: Vec<Box<Shadeable>>) -> Self {
+        pub fn new(objects: Vec<Box<dyn Shadeable>>) -> Self {
             Self {
                 objects: objects,
             }
@@ -792,7 +783,7 @@ pub mod shading {
 
     pub struct ShadingPoint<'a> {
         pub intersection: Intersection<'a>,
-        pub shader: &'a Shader,
+        pub shader: &'a dyn Shader,
     }
 
     pub mod impls {
