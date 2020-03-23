@@ -13,10 +13,10 @@
 // You should have received a copy of the GNU General Public License
 // along with rsrt. If not, see <http://www.gnu.org/licenses/>.
 //
-// Copyright 2018 Chris Foster
+// Copyright 2020 Chris Foster
 
-//! `rsrt` is a small, but very extensible ray tracing framework with some useful implementations.  It is useable, and provides a basic
-//! forward path tracer, a sphere, and some simple materials.
+//! `rsrt` is a small, extensible ray tracing framework with some useful implementations.  It provides a basic forward path tracer, a sphere,
+//! and some simple materials.
 //!
 //! To build and render the default scene, use
 //! ```
@@ -26,36 +26,136 @@
 //! ```
 //! $ cargo doc --open
 //! ```
-//!
-//! While it is possible to use `rsrt`'s traits and implementations in other projects, it is not intended to be more than its simple example
-//! binary; its modules and functions are marked `pub` so that `rustdoc` picks them up.  If you want to use them elsewhere, you can move what
-//! you need into a separate `lib.rs` file and have `cargo` build you an actual library.
 
-// This is our only external dependency
-extern crate rand;
+const FILENAME: &'static str = "image.ppm";
+const IMAGE_WIDTH: usize = 512;
+const IMAGE_HEIGHT: usize = 512;
+const SPP: usize = 256;
+const THREADS: usize = 4;
 
-const IMAGE_WIDTH: u32 = 512;
-const IMAGE_HEIGHT: u32 = 512;
-const SPP: u32 = 64;
+use std::io::{self, Write};
+use std::sync::{Arc, mpsc, Mutex};
+use std::thread;
+use std::time::Instant;
 
-/// Sample program that renders a small scene and outputs a .ppm file.
+use self::camera::{Camera, PerspectiveCamera};
+use self::integration::{Integrator, PathTracingIntegrator};
+use self::math::{Float3, Ray};
+use self::sampling::{RandomSampler, Sampler};
+use self::scene::{Object, Scene};
+use self::shading::{Color, EmissionShader, MatteShader, MirrorShader, Radiance};
+use self::shape::Sphere;
+
+/// Renders a sample scene and outputs a .ppm file.
 pub fn main() {
-    use camera::impls::PerspectiveCamera;
-    use integration::impls::PathTracingIntegrator;
-    use math::{Float3, Ray};
-    use sampling::impls::SimpleSampler;
-    use scene::{Object, Scene};
-    use shading::impls::{EmissionShader, MatteShader, MirrorShader};
-    use shapes::Sphere;
+    // Where all of our samples will be collected
+    let image_buffer_radiance = Arc::new(Mutex::new(vec![Radiance::from_f32(0.0); IMAGE_WIDTH * IMAGE_HEIGHT]));
+    let (sample_count_sender, sample_count_receiver) = mpsc::channel();
 
-    // Setup a few spheres as the scene
-    let scene = Scene::new(vec![
+    // This object will compute the rendering integral
+    let integrator = Arc::new(PathTracingIntegrator);
+
+    // The objects we want to render
+    let scene = Arc::new(create_scene());
+
+    // Turns image positions into rays to cast into the scene
+    let camera = Arc::new(PerspectiveCamera::new(
+        Ray::new(
+            Float3::new(0.0, -2.0, 2.5),              // position
+            Float3::new(0.0, 4.0, -1.0).normalized(), // look
+        ),
+        (IMAGE_WIDTH, IMAGE_HEIGHT),
+    ));
+
+    let start_time = Instant::now();
+
+    // Start some number of render threads.  Each thread will render a roughly equal number of samples,
+    // buffering locally before adding its samples to the final collection at the end.
+    let thread_handles = (0..THREADS).map(|i| {
+        // Each thread needs its own copy of the main objects
+        let image_buffer_radiance = image_buffer_radiance.clone();
+        let sample_count_sender = sample_count_sender.clone();
+        let integrator = integrator.clone();
+        let scene = scene.clone();
+        let camera = camera.clone();
+
+        // Each thread will render an equal number of samples, except for the final thread, which
+        // will render whatever the remainder is.
+        let thread_spp = if i < THREADS - 1 {
+            SPP / THREADS
+        } else {
+            SPP / THREADS + SPP % THREADS
+        };
+        let thread_scale = thread_spp as f32 / SPP as f32;
+
+        thread::spawn(move || {
+            let mut sampler = RandomSampler;
+
+            let thread_buffer = render(&*integrator, &*scene, &*camera, &mut sampler, thread_spp, sample_count_sender);
+
+            // Add the contributions to the global pool
+            image_buffer_radiance.lock().unwrap()
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, pixel)| *pixel = *pixel + thread_buffer[i] * thread_scale);
+        })
+    }).collect::<Vec<_>>();
+
+    // This thread gets notified each time a render thread has completed a batch of samples.
+    // Report progress as it's made.
+    let report_thread = thread::spawn(move || {
+        const TOTAL_SAMPLES: usize = SPP * IMAGE_WIDTH * IMAGE_HEIGHT;
+        const REPORT_INTERVAL: usize = TOTAL_SAMPLES / 10;
+
+        println!("Rendering with {} thread{}...", THREADS, if THREADS > 1 { "s" } else { "" });
+        let mut samples = 0;
+        while samples < TOTAL_SAMPLES {
+            let new_samples = sample_count_receiver.recv().unwrap();
+
+            let next_landmark = (samples / REPORT_INTERVAL + 1) * REPORT_INTERVAL;
+            if samples + new_samples >= next_landmark {
+                println!("  {:3}%", next_landmark / REPORT_INTERVAL * 10);
+            }
+
+            samples += new_samples;
+        }
+
+        // Once all samples have been rendered, print some stats
+        let seconds = start_time.elapsed().as_secs_f64();
+        let (rate, prefix) = {
+            let rate = samples as f64 / seconds;
+            if rate < 1000.0 {
+                (rate, "")
+            } else if rate < 1_000_000.0 {
+                (rate / 1000.0, "kilo")
+            } else {
+                (rate / 1_000_000.0, "mega")
+            }
+        };
+        println!("Rendered {} samples in {:.2} seconds, at {:.2} {}samples/second.", samples, seconds, rate, prefix);
+    });
+
+    // Wait for everything to finish
+    thread_handles.into_iter().for_each(|t| t.join().unwrap());
+    report_thread.join().unwrap();
+
+    println!("Writing file...");
+    let image_buffer_u8 = clamp_and_quantize(&*image_buffer_radiance.lock().unwrap());
+    write_ppm_file(FILENAME, &image_buffer_u8).expect("Could not write file");
+    println!("Wrote file \"{}\".", FILENAME);
+}
+
+/// Creates a sample [`Scene`] definition, containing some spheres with different material properties.
+///
+/// [`Scene`]: scene/struct.Scene.html
+pub fn create_scene() -> Scene {
+    Scene::new(vec![
         Box::new(Object::new(
             Sphere::new(
                 Float3::new(-1.0, 3.0, 0.5),    // origin
                 0.5,                            // radius
             ), EmissionShader::new(
-                Float3::new(5.0, 4.0, 3.0),     // emission
+                Radiance::from_rgb(5.0, 4.0, 3.0), // emission
             ),
         )),
         Box::new(Object::new(
@@ -63,7 +163,7 @@ pub fn main() {
                 Float3::new(1.5, 4.0, 1.0),     // origin
                 1.0,                            // radius
             ), MatteShader::new(
-                Float3::new(0.2, 0.9, 0.2),     // color
+                Color::from_rgb(0.2, 0.9, 0.2), // color
             ),
         )),
         Box::new(Object::new(
@@ -71,7 +171,7 @@ pub fn main() {
                 Float3::new(0.35, 3.4, 0.8),    // origin
                 0.2,                            // radius
             ), MirrorShader::new(
-                Float3::new(0.7, 0.1, 0.1),     // color
+                Color::from_rgb(0.7, 0.1, 0.1), // color
             ),
         )),
         Box::new(Object::new(
@@ -79,7 +179,7 @@ pub fn main() {
                 Float3::new(0.0, 6.0, 1.5),     // origin
                 1.5,                            // radius
             ), MirrorShader::new(
-                Float3::new(0.8, 0.8, 0.8),     // color
+                Color::from_rgb(0.8, 0.8, 0.8), // color
             ),
         )),
         Box::new(Object::new(
@@ -87,7 +187,7 @@ pub fn main() {
                 Float3::new(0.0, 5.0, -5000.0), // origin
                 5000.0,                         // radius
             ), MatteShader::new(
-                Float3::new(0.7, 0.6, 0.6),     // color
+                Color::from_rgb(0.7, 0.6, 0.6), // color
             ),
         )),
         Box::new(Object::new(
@@ -95,213 +195,141 @@ pub fn main() {
                 Float3::new(0.0, 0.0, 0.0),     // origin
                 5000.0,                         // radius
             ), EmissionShader::new(
-                Float3::new(0.825, 0.875, 0.95),// emission
+                Radiance::from_rgb(0.825, 0.875, 0.95), // emission
             ),
         )),
-    ]);
-
-    // This object will be helping us to solve the rendering integral
-    let integrator = PathTracingIntegrator::new(&scene);
-
-    // Generates samples for us, which become the starting points for rays to cast into the scene
-    let sampler = SimpleSampler::new((0, IMAGE_WIDTH), (0, IMAGE_HEIGHT), SPP);
-
-    // Turns samples into rays
-    let camera = PerspectiveCamera::new(
-        Ray::new(
-            Float3::new(0.0, -2.0, 2.5),              // position
-            Float3::new(0.0, 4.0, -1.0).normalized(), // look
-        ),
-        (IMAGE_WIDTH, IMAGE_HEIGHT),
-    );
-
-    // Render!
-    let image_buffer_f32 = render(&integrator, &sampler, &camera);
-    let image_buffer_u8 = clamp_and_quantize(&image_buffer_f32);
-    write_ppm_file("image.ppm", &image_buffer_u8);
+    ])
 }
 
-/// Accepts an image buffer of floating point data, clamps each channel to [0, 1], and
-/// quantizes each channel to 8 bits.
-pub fn clamp_and_quantize(image_buffer: &[math::Float3]) -> Vec<u8> {
-    let mut bytes: Vec<u8> = vec![0; (IMAGE_WIDTH * IMAGE_HEIGHT * 3) as usize];
+/// Takes the [`Radiance`] samples returned from the rendering process and returns a buffer
+/// filled with RGB values, 0-255.
+///
+/// [`Radiance`]: shading/type.Radiance.html
+pub fn clamp_and_quantize(image_buffer: &[Radiance]) -> Vec<u8> {
+    let mut bytes: Vec<u8> = vec![0; IMAGE_WIDTH * IMAGE_HEIGHT * 3];
 
     for (index, pixel) in image_buffer.iter().enumerate() {
-        bytes[index * 3 + 0] = math::to_255(pixel.x);
-        bytes[index * 3 + 1] = math::to_255(pixel.y);
-        bytes[index * 3 + 2] = math::to_255(pixel.z);
+        bytes[index * 3 + 0] = math::f32_to_255(pixel.x);
+        bytes[index * 3 + 1] = math::f32_to_255(pixel.y);
+        bytes[index * 3 + 2] = math::f32_to_255(pixel.z);
     }
 
     bytes
 }
 
-/// Uses the integrator to evaluate the integral along as many rays as the given sampler provides.
-pub fn render<'a, I, S, C>(
+/// Collects and returns [`Radiance`] samples from the [`Integrator`], over the [`Scene'].
+///
+/// This function renders the image to the samples/pixel specified in `spp`, periodically reporting its progress
+/// into `sample_count_sender`.
+///
+/// [`Radiance`]: shading/type.Radiance.html
+/// [`Integrator`]: integration/trait.Integrator.html
+/// [`Scene`]: scene/struct.Scene.html
+pub fn render<I, C, S>(
     integrator: &I,
-    sampler: &'a S,
+    scene: &Scene,
     camera: &C,
-) -> Vec<math::Float3> where
-    I: integration::Integrator,
-    S: sampling::Sampler<'a>,
-    C: camera::Camera,
+    sampler: &mut S,
+    spp: usize,
+    sample_count_sender: mpsc::Sender<usize>,
+) -> Vec<Radiance> where
+    I: Integrator,
+    C: Camera,
+    S: Sampler,
 {
-    let mut image_buffer = vec![math::Float3::zero(); (IMAGE_WIDTH * IMAGE_HEIGHT) as usize];
+    let mut radiance_buffer = vec![Radiance::from_f32(0.0); IMAGE_WIDTH * IMAGE_HEIGHT];
+    let sample_scale = 1.0 / spp as f32;
+    for y in 0..IMAGE_HEIGHT {
+        for x in 0..IMAGE_WIDTH {
+            for _ in 0..spp {
+                let ray = camera.generate_ray((x, y), sampler);
+                let radiance = integrator.integrate(scene, ray, sampler);
 
-    println!("Rendering...");
-    const SAMPLE_SCALE: f32 = 1.0 / SPP as f32;
-    for (i, sample) in sampler.iter().enumerate() {
-        let ray = camera.generate_ray(&sample);
+                let pixel = &mut radiance_buffer[y * IMAGE_WIDTH + x];
+                *pixel = *pixel + radiance * sample_scale;
 
-        let radiance = integrator.integrate(ray);
-
-        let pixel = &mut image_buffer[(sample.image_y * IMAGE_WIDTH + sample.image_x) as usize];
-        *pixel = *pixel + radiance * SAMPLE_SCALE;
-
-        if (i + 1) % (IMAGE_WIDTH * IMAGE_HEIGHT) as usize == 0 {
-            let current_spp = (i + 1) / (IMAGE_WIDTH * IMAGE_HEIGHT) as usize;
-            println!("  {} / {} spp, {:.2}%", current_spp, SPP, current_spp as f32 * SAMPLE_SCALE * 100.0);
+                sampler.next_sample();
+            }
+            sampler.reset();
         }
+        sample_count_sender.send(IMAGE_WIDTH * spp).unwrap();
     }
-    println!("Render complete.");
 
-    image_buffer
+    radiance_buffer
 }
 
 /// Writes a quantized image buffer into a .ppm file.
-pub fn write_ppm_file(filename: &str, image_buffer: &[u8]) {
-    use std::io::Write;
-
-    println!("Writing file...");
+pub fn write_ppm_file(filename: &str, image_buffer: &[u8]) -> io::Result<()> {
     let image_file_path = std::path::Path::new(filename);
-    let mut image_file = std::fs::File::create(&image_file_path).expect("Couldn't create image file");
+    let mut image_file = std::fs::File::create(&image_file_path)?;
 
     let image_file_header = format!("P6\n{} {}\n{}\n", IMAGE_WIDTH, IMAGE_HEIGHT, 255);
-    image_file.write_all(image_file_header.as_bytes()).expect("Couldn't write image header");
-    image_file.write_all(image_buffer).expect("Couldn't write image data");
-
-    println!("Wrote file \"{}\".", filename);
-}
-
-pub mod bsdf {
-    //! Bidirectional Scattering Distribution Functions -
-    //! Trait and implementations that define various light-scattering behaviors.
-
-    use math::Float3;
-
-    /// Methods for describing a surface's light-scattering properties.
-    pub trait Bsdf {
-        /// Returns a random incoming vector for the given outgoing vector, and the pdf.
-        fn sample(&self, outgoing: Float3, normal: Float3) -> BsdfSample;
-        /// Unused, so far.
-        fn pdf(&self, outgoing: Float3, normal: Float3, incoming: Float3) -> f32;
-    }
-
-    pub struct BsdfSample {
-        pub incoming: Float3,
-        pub pdf: f32,
-    }
-
-    pub mod impls {
-        //! BSDF implementations
-        use std::f32::consts::{FRAC_1_PI, PI};
-
-        use math::Float3;
-        use bsdf::{Bsdf, BsdfSample};
-
-        /// BRDF for perfect diffuse scattering.
-        #[derive(Debug)]
-        pub struct DiffuseBrdf;
-
-        impl Bsdf for DiffuseBrdf {
-            fn sample(&self, _: Float3, normal: Float3) -> BsdfSample {
-                use rand;
-
-                let r = rand::random::<f32>().sqrt();
-                let theta = 2.0 * PI * rand::random::<f32>();
-
-                let x = r * theta.cos();
-                let y = r * theta.sin();
-                let z = (0.0f32).max(1.0 - x * x - y * y).sqrt();
-
-                let (tangent, bitangent) = normal.make_orthonormals();
-                let incoming = tangent * x + bitangent * y + normal * z;
-
-                BsdfSample { incoming: incoming, pdf: z * FRAC_1_PI }
-            }
-
-            fn pdf(&self, _: Float3, normal: Float3, incoming: Float3) -> f32 {
-                (0.0f32).max(normal.dot(&incoming)) * FRAC_1_PI
-            }
-        }
-
-        /// BRDF for perfect specular scattering.
-        #[derive(Debug)]
-        pub struct MirrorBrdf;
-
-        impl Bsdf for MirrorBrdf {
-            fn sample(&self, outgoing: Float3, normal: Float3) -> BsdfSample {
-                let incoming = normal * 2.0 * normal.dot(&outgoing) - outgoing;
-                BsdfSample { incoming: incoming, pdf: 1.0 }
-            }
-
-            fn pdf(&self, _: Float3, _: Float3, _: Float3) -> f32 {
-                0.0
-            }
-        }
-    }
+    image_file.write_all(image_file_header.as_bytes())?;
+    image_file.write_all(image_buffer)
 }
 
 pub mod camera {
-    //! Cameras are used to generate [rays](math/Ray.t.html) from [samples](sampling/Sample.t.html).
+    //! Cameras are used to generate rays from image positions.
 
-    use math::Ray;
-    use sampling::Sample;
+    use crate::math::{Float3, Ray};
+    use crate::sampling::Sampler;
 
     pub trait Camera {
-        /// Generates a [ray](math/Ray.t.html) from a [sample](sampling/Sample.t.html).
-        fn generate_ray(&self, sample: &Sample) -> Ray;
+        /// Generates a [`Ray`] from the image coordinate `pixel`.  The implementation may use values returned by the
+        /// [`Sampler`] to adjust the generated ray.
+        ///
+        /// [`Ray`]: ../math/struct.Ray.html
+        /// [`Sampler`]: ../sampling/trait.Sampler.html
+        fn generate_ray(&self, pixel: (usize, usize), sampler: &mut dyn Sampler) -> Ray;
     }
 
-    pub mod impls {
-        use camera::Camera;
-        use math::{Float3, Ray};
-        use sampling::Sample;
+    /// Implements a point camera with a FOV of 45 degrees.
+    pub struct PerspectiveCamera {
+        look: Ray,
+        image_size: (usize, usize),
 
-        /// Generates rays from a single point in space, with perspective.
-        /// Currently rays are projected from the camera's origin to an image grid positioned 2 units away along the camera's look axis.
-        #[derive(Debug)]
-        pub struct PerspectiveCamera {
-            look: Ray,
-            image_size: (u32, u32),
-        }
+        view_to_world_x: Float3,
+        view_to_world_y: Float3,
+        view_to_world_z: Float3,
+    }
 
-        impl PerspectiveCamera {
-            /// Creates a camera centered at `look`'s origin, and oriented `look`'s direction.
-            /// `image_size` describes the size of the grid through which to project samples.
-            pub fn new(look: Ray, image_size: (u32, u32)) -> Self {
-                Self {
-                    look: look,
-                    image_size: image_size,
-                }
+    impl PerspectiveCamera {
+        /// Creates a camera centered at `look`'s origin, and oriented `look`'s direction.
+        /// `image_size` describes the size of the grid through which to project samples.
+        pub fn new(look: Ray, image_size: (usize, usize)) -> Self {
+            let view_to_world_z = look.direction;
+            let view_to_world_x = view_to_world_z.cross(&Float3::new(0.0, 0.0, 1.0)).normalized();
+            let view_to_world_y = view_to_world_x.cross(&view_to_world_z);
+
+            Self {
+                look,
+                image_size,
+                view_to_world_x,
+                view_to_world_y,
+                view_to_world_z,
             }
         }
+    }
 
-        impl Camera for PerspectiveCamera {
-            fn generate_ray(&self, sample: &Sample) -> Ray {
-                let direction = Float3::new(2.0 * sample.image_x as f32 / self.image_size.0 as f32 - 1.0,
-                                          -(2.0 * sample.image_y as f32 / self.image_size.0 as f32 - 1.0),
-                                            2.0)
-                                    .normalized();
+    impl Camera for PerspectiveCamera {
+        fn generate_ray(&self, pixel: (usize, usize), sampler: &mut dyn Sampler) -> Ray {
+            let (x, y) = (sampler.next_dimension(), sampler.next_dimension());
 
-                let forward = self.look.direction;
-                let right = forward.cross(&Float3::new(0.0, 0.0, 1.0)).normalized();
-                let up = right.cross(&forward);
+            let image_x = (pixel.0 as f32 + x) / self.image_size.0 as f32;
+            let image_y = (pixel.1 as f32 + y) / self.image_size.1 as f32;
 
-                Ray::new(
-                    self.look.origin,
-                    right * direction.x + up * direction.y + forward * direction.z,
-                )
-            }
+            let view_ray_direction = Float3::new(
+                2.0 * image_x - 1.0,
+                1.0 - 2.0 * image_y,
+                2.0,
+            ).normalized();
+
+            Ray::new(
+                self.look.origin,
+                self.view_to_world_x * view_ray_direction.x +
+                self.view_to_world_y * view_ray_direction.y +
+                self.view_to_world_z * view_ray_direction.z,
+            )
         }
     }
 }
@@ -309,116 +337,73 @@ pub mod camera {
 pub mod integration {
     //! Trait and implementations that attempt to evaluate the integral of the rendering equation.
 
-    use math::{Float3, Ray};
+    use crate::math::Ray;
+    use crate::sampling::Sampler;
+    use crate::scene::Scene;
+    use crate::shading::{Radiance, Shadeable, ShaderSample};
 
     pub trait Integrator {
         /// Integrate along the given ray, returning an estimate of the incoming radiance.
-        fn integrate(&self, ray: Ray) -> Float3;
+        fn integrate(&self, scene: &Scene, ray: Ray, sampler: &mut dyn Sampler) -> Radiance;
     }
 
-    pub mod impls {
-        //! Integrator implementations
+    /// A simple forward path tracer.  Rays bounce a minimum of 3 times, and then are subjected to Russian Roulette termination.
+    pub struct PathTracingIntegrator;
 
-        use integration::Integrator;
-        use math::{Float3, Ray};
-        use scene::Scene;
-        use shading::{Shadeable, ShaderSample};
+    impl Integrator for PathTracingIntegrator {
+        fn integrate(&self, scene: &Scene, mut ray: Ray, sampler: &mut dyn Sampler) -> Radiance {
+            let mut radiance = Radiance::from_f32(0.0);
+            let mut throughput = Radiance::from_f32(1.0);
 
-        /// A simple forward path tracer.  Rays bounce a minimum of 3 times, and then are subjected to Russian Roulette termination.
-        #[derive(Debug)]
-        pub struct PathTracingIntegrator<'a> {
-            scene: &'a Scene,
-        }
-
-        impl<'a> PathTracingIntegrator<'a> {
-            pub fn new(scene: &'a Scene) -> Self {
-                Self {
-                    scene: scene,
+            let mut bounces = 0;
+            'cast_ray: while let Some(mut point) = scene.cast_ray(&ray) {
+                // If we've hit the backside of a surface, flip the normal for the sake of our calculations
+                if ray.direction.dot(&point.intersection.normal) > 0.0 {
+                    point.intersection.normal = point.intersection.normal * -1.0;
                 }
-            }
-        }
 
-        impl<'a> Integrator for PathTracingIntegrator<'a> {
-            fn integrate(&self, mut ray: Ray) -> Float3 {
-                let mut radiance = Float3::zero();
-                let mut throughput = Float3::new(1.0, 1.0, 1.0);
+                // Sample a random bounce off the surface
+                let ShaderSample {
+                    outgoing: next_ray,
+                    radiance: next_radiance,
+                    throughput: next_throughput,
+                } = point.shader.sample(
+                    &ray,
+                    &point.intersection,
+                    radiance,
+                    throughput,
+                    (sampler.next_dimension(), sampler.next_dimension()),
+                );
 
-                let mut bounces = 0;
-                'cast_ray: loop {
-                    if let Some(mut point) = self.scene.cast_ray(&ray) {
-                        // If we've hit the backside of a surface, flip the normal for the sake of our calculations
-                        if ray.direction.dot(&point.intersection.normal) > 0.0 {
-                            point.intersection.normal = point.intersection.normal * -1.0;
-                        }
+                radiance = next_radiance;
+                throughput = next_throughput;
+                bounces += 1;
 
-                        // Sample a random bounce off the surface
-                        let ShaderSample {
-                            outgoing: next_ray,
-                            radiance: next_radiance,
-                            throughput: next_throughput,
-                        } = point.shader.sample(&ray, &point.intersection, radiance, throughput);
-
-                        radiance = next_radiance;
-                        throughput = next_throughput;
-
-                        bounces += 1;
-
-                        let continuation_probability = throughput.average();
-
-                        if continuation_probability == 0.0 {
-                            break 'cast_ray;
-                        } else if bounces > 3 { // If we've bounced more than three times, terminate rays with random chance
-                            if continuation_probability < rand::random::<f32>() {
-                                break 'cast_ray;
-                            }
-
-                            throughput = throughput * continuation_probability;
-                        }
-
-                        // Nudge the next ray slightly off the surface to prevent autocollisions
-                        ray = Ray::new(next_ray.origin + point.intersection.normal * 0.001, next_ray.direction);
-                    } else {
+                let continuation_probability = throughput.average();
+                if continuation_probability == 0.0 {
+                    break 'cast_ray;
+                } else if bounces > 3 { // If we've bounced more than three times, terminate rays with random chance
+                    if continuation_probability < sampler.next_dimension() {
                         break 'cast_ray;
                     }
+                    throughput = throughput * continuation_probability;
                 }
 
-                // The accumulated radiance is what we're after
-                radiance
+                // Nudge the next ray slightly off the surface to prevent autocollisions
+                ray = Ray::new(next_ray.origin + point.intersection.normal * 0.001, next_ray.direction);
             }
+
+            // The accumulated radiance is what we're after
+            radiance
         }
-    }
-}
-
-pub mod intersection {
-    //! Trait and struct for detecting/describing ray-surface intersections.
-    use std::fmt::Debug;
-
-    use math::{Float3, Ray};
-
-    /// A surface that can be detected by a ray.
-    pub trait Intersectable: Debug {
-        fn intersect<'a>(&'a self, ray: &Ray) -> Option<Intersection>;
-    }
-
-    /// An intersection of a surface by a ray.
-    #[derive(Debug)]
-    pub struct Intersection<'a> {
-        /// The time along the ray at which the intersection occurred.
-        pub t: f32,
-        /// The normal of the surface at the intersection point.
-        pub normal: Float3,
-        // u: f32, v: f32,
-        /// The surface that was intersected.
-        pub intersectable: &'a dyn Intersectable,
     }
 }
 
 pub mod math {
     //! A couple geometry-related structures and common operations.
-    use std::f32;
+
     use std::ops::{Add, Sub, Mul, Neg};
 
-    /// A vector of 3 floating point numbers.
     #[derive(Clone, Copy, Debug)]
     pub struct Float3 {
         pub x: f32,
@@ -426,17 +411,10 @@ pub mod math {
         pub z: f32,
     }
 
+    /// A vector of 3 floating point numbers.
     impl Float3 {
         pub fn new(x: f32, y: f32, z: f32) -> Self {
-            Self { x: x, y: y, z: z }
-        }
-
-        pub fn zero() -> Self {
-            Self {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            }
+            Self { x, y, z }
         }
 
         /// Vector dot product.
@@ -550,7 +528,6 @@ pub mod math {
     pub struct Ray {
         pub origin: Float3,
         pub direction: Float3,
-        pub t_bounds: (f32, f32),
     }
 
     impl Ray {
@@ -558,127 +535,133 @@ pub mod math {
             Self {
                 origin: origin,
                 direction: direction,
-                t_bounds: (0.0, f32::MAX),
             }
         }
     }
 
+    /// A surface that can be detected by a ray.
+    pub trait Intersectable {
+        fn intersect(&self, ray: &Ray) -> Option<Intersection>;
+    }
+
+    /// An intersection of a surface by a ray.
+    pub struct Intersection {
+        /// The time along the ray at which the intersection occurred.
+        pub t: f32,
+        /// The normal of the surface at the intersection point.
+        pub normal: Float3,
+    }
+
     /// Clamp an f32 value to [0, 1] and quantize to 8 bits.
-    pub fn to_255(value: f32) -> u8 {
+    pub fn f32_to_255(value: f32) -> u8 {
         (value.max(0.0).min(1.0) * 255.0 + 0.5) as u8
     }
 }
 
 pub mod sampling {
-    //! Trait and implementations for generating image locations to sample.
+    //! Trait and implementations for generating pseudo-random numbers.
 
-    /// An image sample.
-    pub struct Sample {
-        pub image_x: u32,
-        pub image_y: u32,
+    use rand::Rng;
+
+    /// A sample generator.  Each sample is a vector of values, distributed across the multidimensional
+    /// sample space in a manner dependent on the implementation.
+    pub trait Sampler {
+        /// Returns the next dimension of the current sample.
+        fn next_dimension(&mut self) -> f32;
+        /// Advance to the next sample.
+        fn next_sample(&mut self);
+        fn reset(&mut self);
     }
 
-    impl Sample {
-        pub fn new(image_x: u32, image_y: u32) -> Self {
-            Self {
-                image_x: image_x,
-                image_y: image_y,
+    /// Returns uniform random values for each dimension of each sample.
+    pub struct RandomSampler;
+
+    impl Sampler for RandomSampler {
+        fn next_dimension(&mut self) -> f32 {
+            rand::thread_rng().gen()
+        }
+
+        fn next_sample(&mut self) { }
+
+        fn reset(&mut self) { }
+    }
+}
+
+pub mod scattering {
+    //! Trait and implementations that define the scattering behavior of light across different surfaces.
+
+    use std::f32::consts::{FRAC_1_PI, PI};
+
+    use crate::math::Float3;
+    use crate::shading::Radiance;
+
+    /// A Bidirectional Scattering Distribution Function defines a surface's light-scattering properties.
+    pub trait Bsdf {
+        /// Returns a randomly sampled incoming direction for light scattered in the outgoing direction.
+        fn sample_incoming(&self, outgoing: Float3, normal: Float3, sampled_values: (f32, f32)) -> BsdfSample;
+        /// Returns the radiance transmitted from `incoming` to `outgoing`.
+        fn f(&self, outgoing: Float3, normal: Float3, incoming: Float3) -> Radiance;
+        /// Returns the pdf of the light path from `incoming` to `outgoing`.
+        fn pdf(&self, outgoing: Float3, normal: Float3, incoming: Float3) -> f32;
+    }
+
+    pub struct BsdfSample {
+        pub direction: Float3,
+        pub f: Radiance,
+        pub pdf: f32,
+    }
+
+    /// BRDF for perfect diffuse reflectance.
+    pub struct DiffuseBrdf;
+
+    impl Bsdf for DiffuseBrdf {
+        fn sample_incoming(&self, _outgoing: Float3, normal: Float3, sampled_values: (f32, f32)) -> BsdfSample {
+            let r = sampled_values.0.sqrt();
+            let theta = 2.0 * PI * sampled_values.1;
+
+            let x = r * theta.cos();
+            let y = r * theta.sin();
+            let z = (0.0f32).max(1.0 - x * x - y * y).sqrt();
+
+            let (tangent, bitangent) = normal.make_orthonormals();
+            let incoming = tangent * x + bitangent * y + normal * z;
+
+            let pdf = z * FRAC_1_PI;
+
+            BsdfSample {
+                direction: incoming,
+                f: Radiance::from_f32(pdf),
+                pdf: pdf,
             }
+        }
+
+        fn f(&self, outgoing: Float3, normal: Float3, incoming: Float3) -> Radiance {
+            Radiance::from_f32(self.pdf(outgoing, normal, incoming))
+        }
+
+        fn pdf(&self, _outgoing: Float3, normal: Float3, incoming: Float3) -> f32 {
+            (0.0f32).max(normal.dot(&incoming)) * FRAC_1_PI
         }
     }
 
-    /// A sample generator.
-    pub trait Sampler<'a> {
-        type Iter: Iterator<Item = Sample>;
+    /// BRDF for perfect specular reflectance.
+    pub struct MirrorBrdf;
 
-        /// Returns an iterator than can be used to cycle through the samples generator by this sampler.
-        fn iter(&'a self) -> Self::Iter;
-        /// Returns the image rectangle in which this sampler will generate samples.
-        /// The return value is in the form of `((min_x, max_x), (min_y, max_y))`.
-        fn get_bounds(&self) -> ((u32, u32), (u32, u32));
-        /// Returns the average samples per pixel this sampler will generate.
-        fn get_total_spp(&self) -> u32;
-    }
-
-    pub mod impls {
-        //! Sampler implementations
-
-        use sampling::{Sample, Sampler};
-
-        /// Simply generates a sample per pixel, sequentially until the desired samples per pixel have been reached.
-        pub struct SimpleSampler {
-            x_bounds: (u32, u32),
-            y_bounds: (u32, u32),
-            spp: u32,
-        }
-
-        impl SimpleSampler {
-            pub fn new(x_bounds: (u32, u32), y_bounds: (u32, u32), spp: u32) -> Self {
-                Self {
-                    x_bounds: x_bounds,
-                    y_bounds: y_bounds,
-                    spp: spp,
-                }
+    impl Bsdf for MirrorBrdf {
+        fn sample_incoming(&self, outgoing: Float3, normal: Float3, _sampled_values: (f32, f32)) -> BsdfSample {
+            BsdfSample {
+                direction: normal * 2.0 * normal.dot(&outgoing) - outgoing,
+                f: Radiance::from_f32(1.0),
+                pdf: 1.0,
             }
         }
 
-        impl<'a> Sampler<'a> for SimpleSampler {
-            type Iter = SimpleSamplerIterator<'a>;
-
-            fn iter(&'a self) -> Self::Iter {
-                Self::Iter::new(self)
-            }
-
-            fn get_bounds(&self) -> ((u32, u32), (u32, u32)) {
-                (self.x_bounds, self.y_bounds)
-            }
-
-            fn get_total_spp(&self) -> u32 {
-                self.spp
-            }
+        fn f(&self, _outgoing: Float3, _normal: Float3, _incoming: Float3) -> Radiance {
+            Radiance::from_f32(0.0)
         }
 
-        /// An iterator over a [SimpleSampler](SimpleSampler.t.html).
-        pub struct SimpleSamplerIterator<'a> {
-            x: u32,
-            y: u32,
-            s: u32,
-            sampler: &'a SimpleSampler,
-        }
-
-        impl<'a> SimpleSamplerIterator<'a> {
-            pub fn new(sampler: &'a SimpleSampler) -> Self {
-                Self {
-                    x: 0,
-                    y: 0,
-                    s: 0,
-                    sampler: sampler,
-                }
-            }
-        }
-
-        impl<'a> Iterator for SimpleSamplerIterator<'a> {
-            type Item = Sample;
-
-            fn next(&mut self) -> Option<Sample> {
-                if self.s == self.sampler.spp {
-                    None
-                } else {
-                    let sample = Sample::new(self.x, self.y);
-
-                    self.x += 1;
-                    if self.x == self.sampler.x_bounds.1 {
-                        self.x = self.sampler.x_bounds.0;
-                        self.y += 1;
-                        if self.y == self.sampler.y_bounds.1 {
-                            self.y = self.sampler.y_bounds.0;
-                            self.s += 1;
-                        }
-                    }
-
-                    Some(sample)
-                }
-            }
+        fn pdf(&self, _outgoing: Float3, _normal: Float3, _incoming: Float3) -> f32 {
+            0.0
         }
     }
 }
@@ -686,27 +669,34 @@ pub mod sampling {
 pub mod scene {
     //! Scene and object definitions.
 
-    use intersection::Intersectable;
-    use math::Ray;
-    use shading::{Shadeable, Shader, ShadingPoint};
+    use crate::math::{Intersectable, Ray};
+    use crate::shading::{Shadeable, Shader, ShadingPoint};
 
     /// The combination of a shader with an intersectable surface.
-    #[derive(Debug)]
-    pub struct Object<I: Intersectable, S: Shader> {
+    pub struct Object<I, S> where
+        I: Intersectable,
+        S: Shader,
+    {
         intersectable: I,
         shader: S,
     }
 
-    impl<I: Intersectable, S: Shader> Object<I, S> {
+    impl<I, S> Object<I, S> where
+        I: Intersectable,
+        S: Shader,
+    {
         pub fn new(intersectable: I, shader: S) -> Self {
             Self {
-                intersectable: intersectable,
-                shader: shader,
+                intersectable,
+                shader,
             }
         }
     }
 
-    impl<I: Intersectable, S: Shader> Shadeable for Object<I, S> {
+    impl<I, S> Shadeable for Object<I, S> where
+        I: Intersectable,
+        S: Shader,
+    {
         fn cast_ray(&self, ray: &Ray) -> Option<ShadingPoint> {
             if let Some(intersection) = self.intersectable.intersect(ray) {
                 Some(ShadingPoint {
@@ -720,15 +710,14 @@ pub mod scene {
     }
 
     /// A collection of shadeable objects.
-    #[derive(Debug)]
     pub struct Scene {
-        pub objects: Vec<Box<dyn Shadeable>>,
+        pub objects: Vec<Box<dyn Shadeable + Send + Sync>>,
     }
 
     impl Scene {
-        pub fn new(objects: Vec<Box<dyn Shadeable>>) -> Self {
+        pub fn new(objects: Vec<Box<dyn Shadeable + Send + Sync>>) -> Self {
             Self {
-                objects: objects,
+                objects,
             }
         }
     }
@@ -739,13 +728,7 @@ pub mod scene {
 
             for object in &self.objects {
                 if let Some(point) = object.cast_ray(ray) {
-                    if let Some(previous_closest) = closest_point {
-                        if point.intersection.t < previous_closest.intersection.t {
-                            closest_point = Some(point);
-                        } else {
-                            closest_point = Some(previous_closest);
-                        }
-                    } else {
+                    if closest_point.is_none() || point.intersection.t < closest_point.as_ref().unwrap().intersection.t {
                         closest_point = Some(point);
                     }
                 }
@@ -758,133 +741,144 @@ pub mod scene {
 
 pub mod shading {
     //! Traits and implementations for describing material properties and the interaction between rays and materials.
-    use std::fmt::Debug;
 
-    use intersection::Intersection;
-    use math::{Float3, Ray};
+    use crate::math::{Float3, Intersection, Ray};
+    use crate::scattering::{Bsdf, BsdfSample, DiffuseBrdf, MirrorBrdf};
 
-    /// An object that can be detected by a ray and has material properties.
-    pub trait Shadeable: Debug {
-        fn cast_ray(&self, ray: &Ray) -> Option<ShadingPoint>;
+    pub type Radiance = Float3;
+
+    impl Radiance {
+        pub fn from_f32(value: f32) -> Self {
+            Self::new(value, value, value)
+        }
+    }
+
+    pub type Color = Radiance;
+
+    impl Color {
+        pub fn from_rgb(r: f32, g: f32, b: f32) -> Self {
+            Self::new(r, g, b)
+        }
     }
 
     /// A material.
-    pub trait Shader: Debug {
+    pub trait Shader {
         /// Returns a new ray after bouncing the old one off of the material, along with
         /// the new radiance and throughput.
-        fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample;
+        fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Radiance, throughput: Radiance, sampled_values: (f32, f32)) -> ShaderSample;
     }
 
     pub struct ShaderSample {
         pub outgoing: Ray,
-        pub radiance: Float3,
-        pub throughput: Float3,
+        pub radiance: Radiance,
+        pub throughput: Radiance,
+    }
+
+    /// An object that can be detected by a ray and has material properties.
+    pub trait Shadeable {
+        fn cast_ray(&self, ray: &Ray) -> Option<ShadingPoint>;
     }
 
     pub struct ShadingPoint<'a> {
-        pub intersection: Intersection<'a>,
+        pub intersection: Intersection,
         pub shader: &'a dyn Shader,
     }
 
-    pub mod impls {
-        //! Shader implementations
+    /// A material that emits light.
+    pub struct EmissionShader {
+        emission: Radiance,
+    }
 
-        use bsdf::{Bsdf, BsdfSample};
-        use bsdf::impls::{DiffuseBrdf, MirrorBrdf};
-        use intersection::Intersection;
-        use math::{Float3, Ray};
-        use shading::{Shader, ShaderSample};
-
-        /// A material that emits light.
-        #[derive(Debug)]
-        pub struct EmissionShader {
-            emission: Float3,
-        }
-
-        impl EmissionShader {
-            pub fn new(emission: Float3) -> Self {
-                Self {
-                    emission: emission,
-                }
+    impl EmissionShader {
+        pub fn new(emission: Radiance) -> Self {
+            Self {
+                emission,
             }
         }
+    }
 
-        impl Shader for EmissionShader {
-            fn sample(&self, _: &Ray, _: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
-                ShaderSample {
-                    outgoing: Ray::new(Float3::zero(), Float3::zero()), // Reflection is undefined for an emission shader, so this will never be used
-                    radiance: radiance + throughput * self.emission,
-                    throughput: Float3::zero(), // No throughput for emission shaders
-                }
+    impl Shader for EmissionShader {
+        fn sample(&self, _incoming: &Ray, _: &Intersection, radiance: Radiance, throughput: Radiance, _sampled_values: (f32, f32)) -> ShaderSample {
+            ShaderSample {
+                outgoing: Ray::new(
+                    Float3::new(0.0, 0.0, 0.0),
+                    Float3::new(0.0, 0.0, 0.0),
+                ), // Reflection is undefined for emission shaders, so this will never be used
+                radiance: radiance + throughput * self.emission,
+                throughput: Radiance::from_f32(0.0), // No throughput for emission shaders
             }
         }
+    }
 
-        /// A matte material.
-        #[derive(Debug)]
-        pub struct MatteShader {
-            color: Float3,
-            bsdf: DiffuseBrdf,
-        }
+    /// A matte material.
+    pub struct MatteShader {
+        color: Color,
+        bsdf: DiffuseBrdf,
+    }
 
-        impl MatteShader {
-            pub fn new(color: Float3) -> Self {
-                Self {
-                    color: color,
-                    bsdf: DiffuseBrdf,
-                }
+    impl MatteShader {
+        pub fn new(color: Color) -> Self {
+            Self {
+                color,
+                bsdf: DiffuseBrdf,
             }
         }
+    }
 
-        impl Shader for MatteShader {
-            fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
-                let BsdfSample { incoming: outgoing_direction, pdf: _ } = self.bsdf.sample(-incoming.direction, intersection.normal);
+    impl Shader for MatteShader {
+        fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3, sampled_values: (f32, f32)) -> ShaderSample {
+            let BsdfSample {
+                direction: outgoing_direction,
+                f: _,
+                pdf: _,
+            } = self.bsdf.sample_incoming(-incoming.direction, intersection.normal, sampled_values);
 
-                ShaderSample {
-                    outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
-                    radiance: radiance,
-                    throughput: self.color * throughput,
-                }
+            ShaderSample {
+                outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
+                radiance,
+                throughput: self.color * throughput, // * f * (1.0 / pdf)
             }
         }
+    }
 
-        /// A specular material.
-        #[derive(Debug)]
-        pub struct MirrorShader {
-            color: Float3,
-            bsdf: MirrorBrdf,
-        }
+    /// A specular material.
+    pub struct MirrorShader {
+        color: Color,
+        bsdf: MirrorBrdf,
+    }
 
-        impl MirrorShader {
-            pub fn new(color: Float3) -> Self {
-                Self {
-                    color: color,
-                    bsdf: MirrorBrdf,
-                }
+    impl MirrorShader {
+        pub fn new(color: Color) -> Self {
+            Self {
+                color,
+                bsdf: MirrorBrdf,
             }
         }
+    }
 
-        impl Shader for MirrorShader {
-            fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3) -> ShaderSample {
-                let BsdfSample { incoming: outgoing_direction, pdf: _ } = self.bsdf.sample(-incoming.direction, intersection.normal);
+    impl Shader for MirrorShader {
+        fn sample(&self, incoming: &Ray, intersection: &Intersection, radiance: Float3, throughput: Float3, sampled_values: (f32, f32)) -> ShaderSample {
+            let BsdfSample {
+                direction: outgoing_direction,
+                f: _,
+                pdf: _,
+            } = self.bsdf.sample_incoming(-incoming.direction, intersection.normal, sampled_values);
 
-                ShaderSample {
-                    outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
-                    radiance: radiance,
-                    throughput: self.color * throughput,
-                }
+            ShaderSample {
+                outgoing: Ray::new(incoming.origin + incoming.direction * intersection.t, outgoing_direction),
+                radiance,
+                throughput: self.color * throughput, // * f * (1.0 / pdf)
             }
         }
     }
 }
 
-pub mod shapes {
+pub mod shape {
     //! Intersectable shapes.
 
-    use intersection::{Intersectable, Intersection};
-    use math::{Float3, Ray};
+    use crate::math::{Float3, Intersectable, Intersection, Ray};
 
-    /// A basic sphere.  An origin and a radius.
-    #[derive(Debug)]
+    /// A sphere, defined by an origin and a radius.
     pub struct Sphere {
         pub origin: Float3,
         pub radius: f32,
@@ -893,14 +887,14 @@ pub mod shapes {
     impl Sphere {
         pub fn new(origin: Float3, radius: f32) -> Self {
             Self {
-                origin: origin,
-                radius: radius,
+                origin,
+                radius,
             }
         }
     }
 
     impl Intersectable for Sphere {
-        fn intersect<'a>(&'a self, ray: &Ray) -> Option<Intersection> {
+        fn intersect(&self, ray: &Ray) -> Option<Intersection> {
             use std::mem;
 
             let r = Ray::new(ray.origin - self.origin, ray.direction);
@@ -927,25 +921,21 @@ pub mod shapes {
                 mem::swap(t0, t1);
             }
 
-            if *t0 > ray.t_bounds.1 || *t1 < ray.t_bounds.0 {
+            if *t1 < 0.0 {
                 return None;
             }
 
-            let t = if *t0 >= ray.t_bounds.0 {
+            let t = if *t0 >= 0.0 {
                 *t0
             } else {
                 *t1
             };
-            if t > ray.t_bounds.1 {
-                return None;
-            }
 
             let normal = (r.origin + r.direction * t).normalized();
 
             Some(Intersection {
                 t: t,
                 normal: normal,
-                intersectable: self,
             })
         }
     }
